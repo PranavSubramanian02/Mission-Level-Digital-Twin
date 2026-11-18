@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UAV Mission-Level Digital Twin — Operations Console</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230b0f19'/><circle cx='16' cy='16' r='8' fill='%2338bdf8'/></svg>">
+    <link rel="stylesheet" href="css/tokens.css">
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+</head>
+<body>
+    <!-- Top Aerospace Cockpit Header -->
+    <header class="topbar">
+        <div class="brand">
+            <span class="brand-title">UAV Mission-Level Digital Twin</span>
+            <span class="brand-sub">C++20 OpenMP + 6-State UKF + 1-RC Electro-Thermal ECM + CVaR-95 Risk</span>
+        </div>
+        <nav class="nav-tabs">
+            <button class="tab-btn active" data-tab="preflight">Pre-Flight Risk</button>
+            <button class="tab-btn" data-tab="pareto">3D CVaR Pareto</button>
+            <button class="tab-btn" data-tab="livetwin">Live UKF Twin</button>
+            <button class="tab-btn" data-tab="historian">SQL Historian</button>
+        </nav>
+        <div id="global-advisory" class="status-pill nominal">STANDBY</div>
+    </header>
+
+    <div class="shell">
+        <!-- Left Mission Configuration & Fault Control Sidebar -->
+        <aside class="sidebar">
+            <div class="panel">
+                <div class="panel-title">Mission Parameters</div>
+                <div class="control-group">
+                    <div class="control-row">
+                        <label class="control-label"><span>Cruise Airspeed</span><span id="val-vcruise" class="control-val">18.0 m/s</span></label>
+                        <input id="inp-vcruise" type="range" min="14" max="26" step="0.5" value="18.0">
+                    </div>
+                    <div class="control-row">
+                        <label class="control-label"><span>Headwind (North)</span><span id="val-windn" class="control-val">-4.0 m/s</span></label>
+                        <input id="inp-windn" type="range" min="-12" max="6" step="0.5" value="-4.0">
+                    </div>
+                    <div class="control-row">
+                        <label class="control-label"><span>Crosswind (East)</span><span id="val-winde" class="control-val">1.5 m/s</span></label>
+                        <input id="inp-winde" type="range" min="-8" max="8" step="0.5" value="1.5">
+                    </div>
+                    <div class="control-row">
+                        <label class="control-label"><span>OU Gust Sigma</span><span id="val-gust" class="control-val">1.8 m/s</span></label>
+                        <input id="inp-gust" type="range" min="0" max="5" step="0.2" value="1.8">
+                    </div>
+                    <div class="control-row">
+                        <label class="control-label"><span>Pack Resistance R0</span><span id="val-r0" class="control-val">85 mOhm</span></label>
+                        <input id="inp-r0" type="range" min="40" max="160" step="5" value="85">
+                    </div>
+                    <div class="control-row">
+                        <label class="control-label"><span>Monte Carlo Runs</span><span id="val-nruns" class="control-val">1000</span></label>
+                        <input id="inp-nruns" type="range" min="200" max="4000" step="200" value="1000">
+                    </div>
+                    <button id="btn-run-preflight" class="btn">Run C++ OpenMP Risk Sweep</button>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-title">Live Twin Fault Injection</div>
+                <div class="control-group">
+                    <div class="control-row">
+                        <label class="control-label"><span>Active Route</span></label>
+                        <select id="sel-live-route">
+                            <option value="0">Route A (Short ISR)</option>
+                            <option value="1" selected>Route B (Mid Corridor)</option>
+                            <option value="2">Route C (Extended Range)</option>
+                        </select>
+                    </div>
+                    <div class="btn-stack">
+                        <button id="btn-twin-start" class="btn">Start Live WebSocket Twin</button>
+                        <button id="btn-twin-stop" class="btn btn-outline">Pause Stream</button>
+                        <button id="btn-fault-icing" class="btn btn-caution">Inject Icing (+0.010 CD0)</button>
+                        <button id="btn-fault-aging" class="btn btn-danger">Inject Cell Aging (+45 mOhm)</button>
+                        <button id="btn-fault-wind" class="btn btn-caution">Inject Headwind Shift (-4 m/s)</button>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Operational Views -->
+        <main class="content">
+            <!-- View 1: Pre-Flight Mission Risk & Feasibility -->
+            <section id="view-preflight" class="view-section active">
+                <div class="kpi-grid">
+                    <div class="kpi-card">
+                        <span class="kpi-label">Route B P(Success)</span>
+                        <span id="kpi-psucc" class="kpi-value">-- %</span>
+                        <span class="kpi-sub">Reserve + No Brownout</span>
+                    </div>
+                    <div class="kpi-card">
+                        <span class="kpi-label">CVaR-95% SOC Floor</span>
+                        <span id="kpi-cvar" class="kpi-value">-- %</span>
+                        <span class="kpi-sub">Worst 5% Tail Mean</span>
+                    </div>
+                    <div class="kpi-card">
+                        <span class="kpi-label">P05 Terminal Voltage</span>
+                        <span id="kpi-vterm" class="kpi-value">-- V</span>
+                        <span class="kpi-sub">Cutoff Limit: 18.8 V</span>
+                    </div>
+                    <div class="kpi-card">
+                        <span class="kpi-label">Mean Flight Time</span>
+                        <span id="kpi-time" class="kpi-value">-- min</span>
+                        <span class="kpi-sub">Outbound + Loiter + RTB</span>
+                    </div>
+                </div>
+
+                <div class="chart-grid-2">
+                    <div class="panel">
+                        <div class="panel-title">SOC & 1-RC Terminal Voltage Trajectory</div>
+                        <div id="plot-soc-voltage" class="plot-box"></div>
+                    </div>
+                    <div class="panel">
+                        <div class="panel-title">Monte Carlo Final SOC Probability Density</div>
+                        <div id="plot-mc-pdf" class="plot-box"></div>
+                    </div>
+                    <div class="panel">
+                        <div class="panel-title">Mission Success & CVaR Tail Comparison</div>
+                        <div id="plot-route-bars" class="plot-box"></div>
+                    </div>
+                    <div class="panel">
+                        <div class="panel-title">Electrical Power Required vs Airspeed</div>
+                        <div id="plot-power-curve" class="plot-box"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- View 2: Continuous 3D Energy-Time-CVaR Pareto Frontier -->
+            <section id="view-pareto" class="view-section">
+                <div class="panel">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                        <div class="panel-title" style="margin-bottom:0;">Continuous Energy–Time–CVaR Pareto Frontier</div>
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <select id="sel-pareto-mode">
+                                <option value="3d" selected>3D Interactive (Drag to Rotate)</option>
+                                <option value="2d">2D SVG Contour Scatter</option>
+                            </select>
+                            <button id="btn-run-pareto" class="btn">Compute Pareto Front</button>
+                        </div>
+                    </div>
+                    <div id="plot-pareto-3d" class="plot-box-tall"></div>
+                </div>
+            </section>
+
+            <!-- View 3: Live Bidirectional Digital Twin & UKF Assimilation -->
+            <section id="view-livetwin" class="view-section">
+                <div class="kpi-grid">
+                    <div class="kpi-card">
+                        <span class="kpi-label">UKF Estimated SOC</span>
+                        <span id="live-soc" class="kpi-value">-- %</span>
+                        <span id="live-soc-std" class="kpi-sub">3-sigma: --</span>
+                    </div>
+                    <div class="kpi-card">
+                        <span class="kpi-label">UKF Estimated R0</span>
+                        <span id="live-r0" class="kpi-value">-- mOhm</span>
+                        <span id="live-r0-true" class="kpi-sub">Truth: --</span>
+                    </div>
+                    <div class="kpi-card">
+                        <span class="kpi-label">UKF Estimated dCD0</span>
+                        <span id="live-cd0" class="kpi-value">--</span>
+                        <span id="live-cd0-true" class="kpi-sub">Truth: --</span>
+                    </div>
+                    <div class="kpi-card">
+                        <span class="kpi-label">Live Lookahead P(Success)</span>
+                        <span id="live-psucc" class="kpi-value">-- %</span>
+                        <span id="live-adv-msg" class="kpi-sub">Awaiting stream</span>
+                    </div>
+                </div>
+
+                <div class="chart-grid-2">
+                    <div class="panel">
+                        <div class="panel-title">Tactical 2D Corridor, Live UAV & Wind Vector</div>
+                        <canvas id="tactical-canvas"></canvas>
+                    </div>
+                    <div class="panel">
+                        <div class="panel-title">Online C++ UKF Fault Convergence (dCD0 & R0)</div>
+                        <div id="plot-ukf-live" class="plot-box"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- View 4: Digital Thread SQLite Historian & Figure Export -->
+            <section id="view-historian" class="view-section">
+                <div class="panel">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                        <div class="panel-title" style="margin-bottom:0;">SQLite Digital Thread Black-Box Runs</div>
+                        <div style="display:flex; gap:8px;">
+                            <button id="btn-refresh-sql" class="btn btn-outline">Refresh SQL Log</button>
+                            <button id="btn-export-figs" class="btn">Export 300 DPI Figures</button>
+                            <a id="btn-download-zip" class="btn btn-outline" href="/api/v1/export/figures.zip" style="text-decoration:none; display:inline-flex; align-items:center;">Download ZIP</a>
+                        </div>
+                    </div>
+                    <div id="export-status" class="export-banner" style="display:none;"></div>
+                    <div id="export-gallery" class="export-grid" style="display:none;"></div>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Run ID</th>
+                                <th>Timestamp (UTC)</th>
+                                <th>Route</th>
+                                <th>Va (m/s)</th>
+                                <th>P(Success)</th>
+                                <th>CVaR-95 SOC</th>
+                                <th>Min Vterm P05</th>
+                                <th>Advisory</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historian-tbody"></tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="js/api_client.js"></script>
+    <script src="js/plots.js"></script>
+    <script src="js/map_canvas.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
